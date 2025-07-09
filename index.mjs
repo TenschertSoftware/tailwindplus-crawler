@@ -163,6 +163,9 @@ async function fetchWithRetry(url, retries, options = {}) {
     const start = new Date().getTime()
     let response
     let cookieHeader = getCookieHeader(cookies)
+    if (url.includes('plus/plus')) {
+      url = url.replace(/plus\/plus/g, 'plus')
+    }
     console.log(`🔍  Fetching ${url}`)
     try {
       response = await fetchHttps(url, {
