@@ -16,7 +16,7 @@ jobs:
           output: TenschertSoftware/TailwindPlus
           branch: main  # output branch
           outputfolder: ./
-          actor: ${{ secrets.BOT_ACTOR }}
+          actor: TenschertSoftwareBot
           token: ${{ secrets.BOT_TOKEN }}
           commitmessage: "Update Tailwind Plus"
           crawler: ${{ github.repository }}
