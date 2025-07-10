@@ -1,0 +1,28 @@
+name: Crawl Tailwind Templates
+
+on:
+  workflow_dispatch:     # Manuell auslösbar
+  schedule:
+    - cron: '0 0 * * 1'  # Optional: jeden Montag um Mitternacht
+
+jobs:
+  crawl-and-export:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run Tailwindplus Crawler Action
+        uses: TenschertSoftware/tailwindplus-crawler-action@main
+        with:
+          repository: TenschertSoftware/tailwindplus          # Output-Repo, wo die Daten landen sollen
+          crawler: TenschertSoftware/tailwindplus-crawler     # Steuer-Repo (optional, meist für eigene Logik)
+          output: TenschertSoftware/tailwindplus              # Zielrepo (Output)
+          branch: main                                       # Ziel-Branch im Output-Repo
+          outputfolder: .                                    # Schreibe ins Wurzelverzeichnis im Output-Repo
+          commitmessage: "Update Tailwind-Komponenten (automatisch)"
+          actor: ${{ secrets.BOT_ACTOR }}                    # GitHub-User für Push
+          token: ${{ secrets.BOT_TOKEN }}                    # Personal Access Token oder Repo-Token für Schreibrechte auf tailwindplus
+        env:
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          LANGUAGES: react,alpine,html
+          COMPONENTS: all
