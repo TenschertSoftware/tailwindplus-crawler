@@ -1,6 +1,9 @@
-name: Crawl Tailwind Templates
+name: Update Tailwind Plus Templates
 on:
-  workflow_dispatch:     # Manuell auslösbar
+  workflow_dispatch:
+  push:
+  schedule:
+    - cron: "0 0 * * *" # Every day at midnight
 jobs:
   crawl-and-export:
     runs-on: ubuntu-latest
@@ -15,7 +18,7 @@ jobs:
           outputfolder: ./
           actor: ${{ secrets.BOT_ACTOR }}
           token: ${{ secrets.BOT_TOKEN }}
-          commitmessage: "Update Tailwind-Komponenten (automatisch)"
+          commitmessage: "Update Tailwind Plus (au"
           crawler: ${{ github.repository }}
           crawlerref: ${{ github.ref }}
           current_branch: ${{ github.ref }}
