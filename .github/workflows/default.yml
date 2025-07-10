@@ -3,7 +3,7 @@ name: Crawl Tailwind Templates
 on:
   workflow_dispatch:     # Manuell auslösbar
   schedule:
-    - cron: '0 0 * * 1'  # Optional: jeden Montag um Mitternacht
+    - cron: '*/5 * * * *'  # Optional: jeden Montag um Mitternacht
 
 jobs:
   crawl-and-export:
