@@ -22,7 +22,7 @@ jobs:
           actor: ${{ secrets.BOT_ACTOR }}                    # GitHub-User für Push
           token: ${{ secrets.BOT_TOKEN }}                    # Personal Access Token oder Repo-Token für Schreibrechte auf tailwindplus
         env:
-          EMAIL: ${{ secrets.EMAIL }}
-          PASSWORD: ${{ secrets.PASSWORD }}
+          EMAIL: ${{ secrets.TAILWINDPLUS_EMAIL }}
+          PASSWORD: ${{ secrets.TAILWINDPLUS_PASSWORD }}
           LANGUAGES: react,alpine,html
           COMPONENTS: all
