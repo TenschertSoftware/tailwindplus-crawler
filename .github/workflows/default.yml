@@ -24,5 +24,9 @@ jobs:
         env:
           EMAIL: ${{ secrets.TAILWINDPLUS_EMAIL }}
           PASSWORD: ${{ secrets.TAILWINDPLUS_PASSWORD }}
-          LANGUAGES: react,alpine,html
+          LANGUAGES: html,react,vue,alpine
           COMPONENTS: all
+          BUILDINDEX: 1
+          TEMPLATES: 1
+          FORCE_UPDATE: 0
+          DEBUG: 0
