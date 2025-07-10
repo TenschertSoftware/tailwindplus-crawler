@@ -13,17 +13,18 @@ jobs:
       - name: Run Tailwindplus Crawler Action
         uses: TenschertSoftware/tailwindplus-crawler-action@main
         with:
-          repository: TenschertSoftware/tailwindplus          # Output-Repo, wo die Daten landen sollen
-          crawler: TenschertSoftware/tailwindplus-crawler     # Steuer-Repo (optional, meist für eigene Logik)
-          output: TenschertSoftware/tailwindplus              # Zielrepo (Output)
-          branch: main                                       # Ziel-Branch im Output-Repo
-          outputfolder: .                                    # Schreibe ins Wurzelverzeichnis im Output-Repo
+          email: ${{ secrets.TAILWINDPLUS_EMAIL }}
+          password: ${{ secrets.TAILWINDPLUS_PASSWORD }}
+          output: TenschertSoftware/tailwindplus
+          branch: main  # output branch
+          outputfolder: ./
+          actor: ${{ secrets.BOT_ACTOR }}
+          token: ${{ secrets.BOT_TOKEN }}
           commitmessage: "Update Tailwind-Komponenten (automatisch)"
-          actor: ${{ secrets.BOT_ACTOR }}                    # GitHub-User für Push
-          token: ${{ secrets.BOT_TOKEN }}                    # Personal Access Token oder Repo-Token für Schreibrechte auf tailwindplus
+          crawler: ${{ github.repository }}
+          crawlerref: ${{ github.ref }}
+          current_branch: ${{ github.ref }}
         env:
-          EMAIL: ${{ secrets.TAILWINDPLUS_EMAIL }}
-          PASSWORD: ${{ secrets.TAILWINDPLUS_PASSWORD }}
           LANGUAGES: html,react,vue,alpine
           COMPONENTS: all
           BUILDINDEX: 1
