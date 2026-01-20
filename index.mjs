@@ -94,6 +94,7 @@ export function mergeDeep(target, source) {
 }
 
 const rootUrl = 'https://tailwindcss.com/plus'
+const baseUrl = new URL(rootUrl).origin
 const output = process.env.OUTPUT || './output'
 // list of languages to save (defaults to html)
 const languages = (process.env.LANGUAGES || 'html').split(',')
@@ -106,6 +107,7 @@ let oldAssets = {}
 let newAssets = {}
 const regexEmail = new RegExp(process.env.EMAIL.replace(/[.@]/g, '\\$&'), 'g')
 let cookies = {}
+let xInertiaVersion = null
 // Component tracking
 let processedCategories = new Set()
 let processedComponents = 0
@@ -207,6 +209,7 @@ function parseSetCookieHeaders(setCookieHeaders) {
 
 async function downloadPage(url) {
   if (!url.startsWith(rootUrl)) url = rootUrl + url
+  url = url.replace('/plus/plus/', '/plus/')
 
   const response = await fetchWithRetry(url, retries)
   const html = await response.text()
@@ -227,11 +230,122 @@ async function postData(url, data) {
         'content-length': Buffer.byteLength(body),
         cookie: getCookieHeader(cookies),
         'x-inertia': 'true',
+        'x-requested-with': 'XMLHttpRequest',
         'x-xsrf-token': cookies['XSRF-TOKEN'],
       },
     },
     body,
   )
+}
+
+async function putData(url, data) {
+  if (!url.startsWith(rootUrl)) url = rootUrl + url
+
+  const body = JSON.stringify(data)
+
+  return fetchHttps(
+    url,
+    {
+      method: 'PUT',
+      headers: {
+        accept: 'text/html, application/xhtml+xml',
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(body),
+        cookie: getCookieHeader(cookies),
+        'x-requested-with': 'XMLHttpRequest',
+        'x-inertia': 'true',
+        'x-inertia-version': xInertiaVersion,
+        'x-xsrf-token': cookies['XSRF-TOKEN'],
+      },
+    },
+    body,
+  )
+}
+
+async function setComponentLanguage(uuid, language) {
+  const languageMap = {
+    html: 'html-v4-system',
+    react: 'react-v4-system',
+    vue: 'vue-v4-system',
+  }
+
+  const snippetLang = languageMap[language]
+  if (!snippetLang) {
+    console.log(`⚠️  Unknown language: ${language}`)
+    return false
+  }
+
+  console.log(`🔄  Setting language to ${language} for component ${uuid}`)
+
+  try {
+    const response = await putData('/ui-blocks/language', {
+      uuid: uuid,
+      snippet_lang: snippetLang,
+    })
+
+    // Check for various success status codes (including redirects)
+    if (
+      response.status === 200 ||
+      response.status === 204 ||
+      // The API returns 303 (See Other) to indicate successful language change
+      // This follows the Post-Redirect-Get pattern for state-changing operations
+      response.status === 302 ||
+      response.status === 303
+    ) {
+      return true
+    }
+
+    console.error(
+      `⚠️  Language API returned status ${response.status} for ${language}`,
+    )
+    if (process.env.DEBUG === '1') {
+      const responseText = await response.text()
+      console.log(
+        `Debug: Language API response body: ${responseText.slice(0, 200)}`,
+      )
+    }
+
+    return false
+  } catch (error) {
+    console.log(`❌ Error setting language ${language}: ${error.message}`)
+    return false
+  }
+}
+
+async function fetchUpdatedComponent(url, uuid) {
+  try {
+    // Re-fetch the component page to get updated data
+    const html = await downloadPage(url)
+    const $ = cheerio.load(html)
+    const json = $('#app').attr('data-page')
+
+    if (!json) {
+      console.log(`⚠️  No component data found when re-fetching ${url}`)
+      return null
+    }
+
+    const data = JSON.parse(json)
+    if (!data.props?.subcategory?.components) {
+      console.log(`⚠️  No components found in re-fetched data for ${url}`)
+      return null
+    }
+
+    // Find the component with matching UUID
+    const component = data.props.subcategory.components.find(
+      (c) => c.uuid === uuid,
+    )
+    if (!component) {
+      console.log(
+        `⚠️  Component with UUID ${uuid} not found in re-fetched data`,
+      )
+      return null
+    }
+
+    return component
+  } catch (error) {
+    console.log(`❌ Error re-fetching component data: ${error.message}`)
+    return null
+  }
 }
 
 function getCookieHeader(cookies) {
@@ -245,7 +359,8 @@ function getCookieHeader(cookies) {
 
 async function processComponentPage(url) {
   const html = await downloadPage(url)
-  if (!html.includes(process.env.EMAIL)) {
+
+  if (!html.includes('id="app"') || !html.includes('data-page')) {
     console.log(`🚫   Not logged in`)
     process.exit()
   }
@@ -267,8 +382,12 @@ async function processComponentPage(url) {
   }
 
   const data = JSON.parse(json)
-  console.log(`Debug: data structure:`, Object.keys(data))
-  console.log(`Debug: props structure:`, Object.keys(data.props || {}))
+  if (process.env.DEBUG === '1') {
+    console.log(`Debug: data structure keys: [${Object.keys(data).join(',')}]`)
+    console.log(
+      `Debug: props structure keys: [${Object.keys(data.props || {}).join(',')}]`,
+    )
+  }
 
   if (
     !data.props ||
@@ -288,7 +407,11 @@ async function processComponentPage(url) {
 
   // Debug the structure of the first component
   if (components.length > 0) {
-    console.log(`Debug: first component structure:`, Object.keys(components[0]))
+    if (process.env.DEBUG === '1') {
+      console.log(
+        `Debug: first component structure keys: [${Object.keys(components[0]).join(',')}]`,
+      )
+    }
   }
 
   for (let i = 0; i < components.length; i++) {
@@ -321,63 +444,49 @@ async function processComponent(url, component) {
 
   // Log component structure in debug mode
   if (process.env.DEBUG === '1') {
-    console.log(`Debug: Processing component: ${title}`)
     console.log(
-      `Debug: Component snippet:`,
-      component.snippet ? 'present' : 'missing',
+      `Debug: Processing "${title}" | snippet: ${component.snippet ? 'present' : 'missing'} | ${component.snippet ? `keys: [${Object.keys(component.snippet).join(',')}] | uuid: ${component.uuid}` : 'no data'}`,
     )
-    if (component.snippet) {
-      console.log(`Debug: Snippet keys:`, Object.keys(component.snippet))
-      // Log available languages in the snippet
-      console.log(`Debug: Snippet language:`, component.snippet.language)
-      console.log(`Debug: All available snippet properties:`, component.snippet)
-    }
   }
 
-  // Check if component has a snippet property
-  if (component.snippet) {
-    const snippet = component.snippet
+  // Check if component has UUID for language switching
+  if (!component.uuid) {
+    console.log(
+      `⚠️  No UUID found for component ${title}, skipping multi-language support`,
+    )
+    return
+  }
 
-    // Get the language from the snippet
-    const snippetLanguage = snippet.language?.toLowerCase()
+  // Process each requested language
+  for (const language of languages) {
+    console.log(`🔄 Processing ${title} in ${language}...`)
 
-    // Save the code if the language is in our requested languages list
-    if (snippetLanguage && languages.includes(snippetLanguage)) {
-      console.log(`Debug: Saving ${snippetLanguage} code for ${title}`)
-      saveLanguageContent(path, snippetLanguage, snippet.code)
+    // Set the language for this component
+    const success = await setComponentLanguage(component.uuid, language)
+    if (!success) {
+      console.log(`❌ Failed to set language ${language} for ${title}`)
+      continue
     }
 
-    // Also save as react/jsx if available and react is in our languages list
-    if (snippetLanguage === 'jsx' && languages.includes('react')) {
-      console.log(`Debug: Saving react code for ${title}`)
-      saveLanguageContent(path, 'react', snippet.code)
+    // Re-fetch the component page to get updated snippet data
+    const updatedComponent = await fetchUpdatedComponent(url, component.uuid)
+    if (!updatedComponent || !updatedComponent.snippet) {
+      console.log(`❌ Failed to fetch ${language} code for ${title}`)
+      continue
+    }
+
+    // Save the language-specific code
+    const snippet = updatedComponent.snippet
+    if (snippet.code && snippet.code.trim()) {
+      console.log(`✅ Saving ${language} code for ${title}`)
+      await saveLanguageContent(path, language, snippet.code)
+    } else {
+      console.log(`⚠️  No code content for ${language} version of ${title}`)
     }
   }
 
   // save resources required by snippet preview
   const html = component.iframeHtml
-  // if languages contains alpine, then save the preview as alpine
-  if (languages.includes('alpine') && html) {
-    const $body = cheerio.load(html)('body')
-    // default code to body
-    let code = $body.html().trim()
-    // strip empty wrapper divs if present
-    let $container = findFirstElementWithClass($body.children().first())
-
-    if ($container) {
-      code = $container.parent().html().trim()
-    }
-
-    const disclaimer = `<!--
-  This example requires Tailwind CSS v2.0+
-
-  The alpine.js code is *NOT* production ready and is included to preview
-  possible interactivity
--->
-`
-    saveLanguageContent(path, 'alpine', `${disclaimer}${code}`)
-  }
-
   await savePageAndResources(url, null, cheerio.load(html || ''))
 }
 
@@ -395,18 +504,13 @@ function findFirstElementWithClass($elem) {
 }
 
 async function saveLanguageContent(path, language, code) {
-  const ext =
-    language === 'react' ? 'jsx' : language === 'alpine' ? 'html' : language
+  const ext = language === 'react' ? 'jsx' : language
   const dir = `${output}/${language}${dirname(path)}`
 
   if (process.env.DEBUG === '1') {
-    console.log(`Debug: Saving language content for ${language}`)
-    console.log(`Debug: Directory: ${dir}`)
-    console.log(`Debug: Path: ${path}`)
-    console.log(`Debug: Has code: ${code ? 'yes' : 'no'}`)
-    if (code) {
-      console.log(`Debug: Code length: ${code.length}`)
-    }
+    console.log(
+      `Debug: Saving ${language} | ${path} | ${code ? `${code.length} chars` : 'no code'} | ${dir}`,
+    )
   }
 
   ensureDirExists(dir)
@@ -431,21 +535,18 @@ async function saveLanguageContent(path, language, code) {
         'export default function Example()',
         `export default function ${componentName}()`,
       )
-
-      if (process.env.DEBUG === '1') {
-        console.log(`Debug: Renamed component to ${componentName}`)
-      }
     } else if (code.includes('function Example()')) {
       code = code.replace('function Example()', `function ${componentName}()`)
-
-      if (process.env.DEBUG === '1') {
-        console.log(`Debug: Renamed component to ${componentName}`)
-      }
     }
   }
 
-  console.log(`📝  Writing ${language} ${filename}.${ext}`)
-  fs.writeFileSync(filePath, code)
+  // Only write if we have valid code content
+  if (code && code.trim()) {
+    console.log(`📝  Writing ${language} ${filename}.${ext}`)
+    fs.writeFileSync(filePath, code)
+  } else {
+    console.log(`⚠️  Skipping ${language} ${filename}.${ext} - no content`)
+  }
 }
 
 async function savePageAndResources(url, html, $) {
@@ -453,11 +554,11 @@ async function savePageAndResources(url, html, $) {
   const items = $('head>link,script,img')
   for (let i = 0; i < items.length; i++) {
     const $item = $(items[i])
-    const url = $item.attr('src') || $item.attr('href')
-    if (!url || !url.startsWith('/')) continue
+    const assetUrl = $item.attr('src') || $item.attr('href')
+    if (!assetUrl || !assetUrl.startsWith('/')) continue
 
     // strip off querystring
-    const path = new URL(rootUrl + url).pathname
+    const path = new URL(rootUrl + assetUrl).pathname
     const dir = `${output}/preview${dirname(path)}`
     const filePath = `${dir}/${basename(path)}`
     // check assets to see if we've already downloaded this file
@@ -475,7 +576,11 @@ async function savePageAndResources(url, html, $) {
       }
     }
 
-    const response = await fetchWithRetry(rootUrl + url, retries, options)
+    // Handle asset URLs that start with /plus-assets to avoid duplicate /plus
+    const fetchUrl = assetUrl.startsWith('/plus-assets')
+      ? `${baseUrl}${assetUrl}`
+      : `${rootUrl}${assetUrl}`
+    const response = await fetchWithRetry(fetchUrl, retries, options)
     // check etag
     if (response.status === 304) {
       continue
@@ -496,20 +601,41 @@ async function savePageAndResources(url, html, $) {
 }
 
 async function login() {
-  await downloadPage('/login')
+  const loginPageHtml = await downloadPage('/login')
+
+  // Extract Inertia version from the login page data-page attribute
+  const $ = cheerio.load(loginPageHtml)
+  const json = $('#app').attr('data-page')
+  if (json) {
+    try {
+      const data = JSON.parse(json)
+      xInertiaVersion = data.version
+    } catch (err) {
+      console.log('⚠️  Failed to parse login page data:', err.message)
+    }
+  }
+
+  if (process.env.DEBUG === '1') {
+    console.log(`Debug: Extracted Inertia version: ${xInertiaVersion}`)
+  }
 
   const response = await postData('/login', {
     email: process.env.EMAIL,
     password: process.env.PASSWORD,
     remember: false,
   })
-  return response.status === 409 || response.status === 302
+
+  return (
+    response.status === 409 ||
+    response.status === 302 ||
+    response.status === 200
+  )
 }
 
 async function saveTemplates() {
   const html = await downloadPage('/templates')
   const $ = cheerio.load(html)
-  const $templates = $('section[id^="product"]')
+  const $templates = $('div[id^="browse"] section')
   console.log(
     `🔍  Found ${$templates.length} template${
       $templates.length === 1 ? '' : 's'
@@ -517,7 +643,7 @@ async function saveTemplates() {
   )
   for (let i = 0; i < $templates.length; i++) {
     const $template = $($templates[i])
-    const $link = $template.find('h2>a')
+    const $link = $template.find('h3>a')
     const title = $link.text()
     const url = $link.attr('href')
     console.log(`🔍  Downloading template ${title}`)
@@ -630,11 +756,13 @@ function countFilesRecursively(dirPath) {
       )
         continue
 
-      // Make sure it's a full URL, if not prepend rootUrl
-      if (url.startsWith('/')) {
+      // Normalize URL to remove any leading /plus if present
+      if (url.startsWith('/plus/')) {
+        urls.push(url.replace('/plus', ''))
+      } else if (url.startsWith('/')) {
         urls.push(url)
       } else if (url.includes('/ui-blocks/')) {
-        urls.push(url.replace('https://tailwindcss.com/plus', ''))
+        urls.push(url.replace(rootUrl, ''))
       }
     }
 
